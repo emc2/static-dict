@@ -30,6 +30,10 @@
 {-# OPTIONS_GHC -funbox-strict-fields -Wall -Werror #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 
+-- | Interface for static dictionaries.  These are associative data
+-- structures wich do not support dynamic updates, and support a
+-- simpler range of operations than structures such as 'IntMap' or
+-- 'Map'.
 module Data.Dict(
        Dict(..)
        ) where

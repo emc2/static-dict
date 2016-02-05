@@ -31,6 +31,7 @@
 {-# LANGUAGE MultiParamTypeClasses, ScopedTypeVariables,
              FlexibleContexts, FlexibleInstances #-}
 
+-- | Implementation of static dictionaries based on FKS hashing schemes.
 module Data.Dict.FKS(
        module Data.Dict,
        FKSDict,
