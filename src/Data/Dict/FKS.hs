@@ -32,6 +32,7 @@
              FlexibleContexts, FlexibleInstances #-}
 
 module Data.Dict.FKS(
+       module Data.Dict,
        FKSDict,
        dict,
        ) where
