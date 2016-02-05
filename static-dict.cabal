@@ -7,12 +7,12 @@ Author:                 Eric McCorkle
 Maintainer:             Eric McCorkle <emc2@metricspace.net>
 Stability:              Pre-alpha
 Synopsis:               Fast Static Integer Dictionaries
-Homepage:               https://github.com/emc2/compiler-misc
-Bug-Reports:            https://github.com/emc2/compiler-misc/issues
+Homepage:               https://github.com/emc2/static-dict
+Bug-Reports:            https://github.com/emc2/static-dict/issues
 Copyright:              Copyright (c) 2014 Eric McCorkle.  All rights reserved.
 Description:
-  This library provides an implementation of fast static dictionaries as described in Ruzic,
-  "Constructing Efficient Dictionaries in Close to Sorting Time".
+  This library provides an interface for static dictionaries, along with an implementation
+  based on FKS hashing schemes.
 Build-type:             Simple
 Cabal-version:          >= 1.16
 
