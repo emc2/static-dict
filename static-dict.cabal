@@ -25,7 +25,8 @@ Test-Suite UnitTest
   type:                 exitcode-stdio-1.0
   Main-Is:              UnitTest.hs
   hs-source-dirs:       src test
-  build-depends:        base >= 4.4.0 && < 5, Cabal >= 1.16.0, array, bitwise, random
+  build-depends:        base >= 4.4.0 && < 5, Cabal >= 1.16.0, array, bitwise, random,
+                        HUnit-Plus
   ghc-options:          -fhpc
 
 Library
