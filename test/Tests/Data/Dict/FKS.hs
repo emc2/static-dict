@@ -32,6 +32,10 @@ module Tests.Data.Dict.FKS(tests) where
 
 import Data.Array(Array, (!), listArray)
 import Data.Dict.FKS
+import Data.Foldable
+import Data.List(sort)
+import Data.Maybe
+import Data.Traversable
 import Prelude hiding (lookup)
 import Test.HUnitPlus.Base
 
@@ -179,38 +183,56 @@ generators = [
     ("negative", \n -> -n),
     ("double", \n -> 2 * n),
     ("triple", \n -> 3 * n),
-    ("oscillating", \n -> if even n then n `div` 2 else - n `div` 2),
+    ("oscillating", \n -> if even (n+1)
+                          then (n+1) `div` 2
+                          else - (n+1) `div` 2),
     ("neg_pos", \n -> if even n then n else -n),
     ("split", \n -> if even n then n * 2 else n),
     ("split_offset", \n -> if even n then n * 2 else n + 1000),
     ("random", \n -> randdata ! n) ]
+
+checkdict :: [(Int, Int)] -> FKSDict Int Int -> IO ()
+checkdict pairs d =
+  let
+    idxs = map fst pairs
+    sortedelems = sort (map snd pairs)
+    expected = Map.fromList pairs
+
+    checkparity :: Int -> IO ()
+    checkparity idx = lookup d idx @?= Map.lookup idx expected
+
+    checkmember :: Int -> IO ()
+    checkmember idx = isJust (lookup d idx) @=? member d idx
+  in do
+    expected @=? Map.fromList (assocs d)
+    mapM_ checkparity ([0..2048] ++ idxs)
+    mapM_ checkmember ([0..2048] ++ idxs)
+    sortedelems @=? sort (foldr (:) [] d)
 
 maketest :: (String, Int -> Int) -> Int -> Int -> Test
 maketest (genname, gen) size num =
   let
     testname = "dict_" ++ genname ++ "_" ++ show size ++ "_" ++ show num
     pairs = map (\n -> (gen n, n)) [0..size - 1]
-    idxs = map fst pairs
-    expected = Map.fromList pairs
 
-    checkparity :: FKSDict Int Int -> Int -> IO ()
-    checkparity d idx = lookup d idx @?= Map.lookup idx expected
-
+    inc (k, e) = (k, e + 1)
   in
     testname ~: do
       d <- dict pairs
-      expected @=? Map.fromList (assocs d)
-      mapM_ (checkparity d) ([0..2048] ++ idxs)
+      checkdict pairs d
+      checkdict (fmap inc pairs) (fmap (+1) d)
+      d' <- mapM (return . (+1)) d
+      checkdict (fmap inc pairs) d'
 
 testcases :: [Test]
 testcases =
-  foldr (\num accum1 ->
-          foldr (\gen accum2 ->
-                  foldr (\size accum3 ->
+  foldr (\gen accum1 ->
+          foldr (\size accum2 ->
+                  foldr (\num accum3 ->
                           maketest gen size num : accum3)
-                        accum2 sizes)
-                accum1 generators)
-        [] [0..8]
+                        accum2 [0..8])
+                accum1 sizes)
+        [] generators
 
 tests :: Test
 tests = "FKS" ~: testcases
