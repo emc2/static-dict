@@ -34,9 +34,6 @@
 module Data.Dict.FKS(
        FKSDict,
        dict,
-       member,
-       lookup,
-       assocs,
        ) where
 
 import Data.Array(Array)
