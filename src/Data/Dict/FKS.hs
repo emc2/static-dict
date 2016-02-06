@@ -38,6 +38,7 @@ module Data.Dict.FKS(
        dict,
        ) where
 
+import Control.DeepSeq
 import Data.Array(Array)
 import Data.Array.BitArray(BitArray)
 import Data.Array.BitArray.IO(IOBitArray)
@@ -418,6 +419,10 @@ instance (Enum keyty, Eq keyty) => Dict keyty FKSDict where
       bucketfold Empty accum = accum
     in
       foldr entryfold (foldr bucketfold [] buckets) (BitArray.assocs emask)
+
+instance (Enum keyty, Eq keyty, NFData keyty, NFData elemty) =>
+         NFData (FKSDict keyty elemty) where
+  rnf x = seq x ()
 
 instance Functor (Bucket keyty) where
   fmap _ Bucket { bucketOffset = offset, bucketLen = len, bucketA1 = a1,
