@@ -160,7 +160,7 @@ dict alist =
   let
     alpha = 2
     beta = 4
-    nassocs = length alist
+    nbuckets = length alist * 2
 
     bucketsize :: Int -> Int
     bucketsize len = (len * len * alpha)
@@ -183,7 +183,7 @@ dict alist =
         addent a1 a2 b arr ent @ (key, _) =
           let
             hashcode = corehash a1 a2 b key
-            idx = hashcode `mod` fromIntegral nassocs
+            idx = hashcode `mod` fromIntegral nbuckets
           in do
             (_, ents) <- Mutable.read arr idx
             Mutable.write arr idx (0, ent : ents)
@@ -221,9 +221,9 @@ dict alist =
             -- Try to build buckets with the hash function.
             mapM_ (addent a1 a2 b arr) alist
             -- Count the squared bucket size
-            (sqrsum, offset) <- foldrM (addoffset arr) (0, 0) [0 .. nassocs - 1]
+            (sqrsum, offset) <- foldrM (addoffset arr) (0, 0) [0..nbuckets - 1]
             -- Check that the squared sum is less than beta times the length
-            if sqrsum <= nassocs * beta
+            if sqrsum <= nbuckets * beta
               -- If we succeeded, then freeze the array.
               then do
                 frozen <- Vector.unsafeFreeze arr
@@ -231,7 +231,7 @@ dict alist =
               -- Otherwise, try again with a different hash function.
               else genbuckets arr
       in do
-        arr <- Mutable.new nassocs
+        arr <- Mutable.new nbuckets
         genbuckets arr
 
     -- If the bucket list is empty, convert it to an empty bucket.
