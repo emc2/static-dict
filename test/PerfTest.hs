@@ -114,7 +114,6 @@ accessBenchmark name dat = bgroup name [
 
 main :: IO ()
 main = defaultMain [
-  {-
     bgroup "create" [
       env (createEntries 4 4) (creationBenchmark "4_4"),
       env (createEntries 4 16) (creationBenchmark "4_16"),
@@ -142,7 +141,6 @@ main = defaultMain [
       env (createEntries 16384 4194304) (creationBenchmark "16384_4194304"),
       env (createEntries 16384 16777216) (creationBenchmark "16384_16777216")
     ],
--}
     bgroup "access" [
       env (createAccesses 4 4 10) (accessBenchmark "4_4_10"),
       env (createAccesses 4 4 100) (accessBenchmark "4_4_100"),

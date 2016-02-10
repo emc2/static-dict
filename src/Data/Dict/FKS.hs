@@ -39,22 +39,19 @@ module Data.Dict.FKS(
        ) where
 
 import Control.DeepSeq
-import Data.Array(Array)
 import Data.Array.BitArray(BitArray)
-import Data.Array.BitArray.IO(IOBitArray)
-import Data.Array.IO(IOArray)
 import Data.Bits
 import Data.Dict
 import Data.Foldable
 import Data.Functor
 import Data.Maybe
 import Data.Word
+import Data.Vector(Vector)
 import Prelude hiding (lookup)
 import System.Random
 
-import qualified Data.Array as Array
-import qualified Data.Array.IO as IOArray
-import qualified Data.Array.Unsafe as Unsafe
+import qualified Data.Vector as Vector
+import qualified Data.Vector.Generic.Mutable as Mutable
 import qualified Data.Array.BitArray as BitArray
 import qualified Data.Array.BitArray.IO as IOBitArray
 
@@ -65,9 +62,9 @@ data Bucket keyty elemty =
     -- and local hash function.
     Bucket {
       -- | Offset into the bucket content array.
-      bucketOffset :: !Word32,
+      bucketOffset :: !Int,
       -- | Offset length of the segment in the bucket content array.
-      bucketLen :: !Word32,
+      bucketLen :: !Int,
       -- | Value of a1 in the local hash function.
       bucketA1 :: !Word64,
       -- | Value of a2 in the local hash function.
@@ -91,7 +88,7 @@ data FKSDict keyty elemty =
     -- | Hash table with only a single level.
     Simple {
       -- | Simple hash table, no collisions
-      simpleBuckets :: !(Array Word32 (Maybe (keyty, elemty))),
+      simpleBuckets :: !(Vector (Maybe (keyty, elemty))),
       -- | Value of a1 in the local hash function.
       simpleA1 :: !Word64,
       -- | Value of a2 in the hash function.
@@ -101,12 +98,12 @@ data FKSDict keyty elemty =
     }
   | Dict {
       -- | First-level array containing buckets.
-      dictBuckets :: !(Array Word32 (Bucket keyty elemty)),
+      dictBuckets :: !(Vector (Bucket keyty elemty)),
       -- | Second-level array containing actual entries.
-      dictEntries :: !(Array Word32 (keyty, elemty)),
+      dictEntries :: !(Vector (keyty, elemty)),
       -- | Bit array indicating whether or not an index in the entries
       -- array contains anything.
-      dictEntryMask :: !(BitArray Word32),
+      dictEntryMask :: !(BitArray Int),
       -- | Value of a1 in the hash function.
       dictA1 :: !Word64,
       -- | Value of a2 in the hash function.
@@ -115,7 +112,7 @@ data FKSDict keyty elemty =
       dictB :: !Word64
     }
 
-corehash :: Enum keyty => Word64 -> Word64 -> Word64 -> keyty -> Word32
+corehash :: Enum keyty => Word64 -> Word64 -> Word64 -> keyty -> Int
 corehash a1 a2 b key =
   let
     -- Convert to a Word64
@@ -129,23 +126,23 @@ corehash a1 a2 b key =
     fromIntegral (((a1 + x1) * (a2 + x2) + b) `shiftR` 32)
 
 -- | Hash a value by the dictionary hash.
-dicthash :: Enum keyty => FKSDict keyty elemty -> keyty -> Word32
+dicthash :: Enum keyty => FKSDict keyty elemty -> keyty -> Int
 dicthash Simple { simpleBuckets = arr, simpleA1 = a1,
                   simpleA2 = a2, simpleB = b } key =
   let
     hashcode = corehash a1 a2 b key
-    len = snd (Array.bounds arr) + 1
+    len = Vector.length arr
   in
     hashcode `mod` len
 dicthash Dict { dictBuckets = arr, dictA1 = a1, dictA2 = a2, dictB = b } key =
   let
     hashcode = corehash a1 a2 b key
-    len = snd (Array.bounds arr) + 1
+    len = Vector.length arr
   in
     hashcode `mod` len
 
 -- | Hash a value by the dictionary hash.
-buckethash :: Enum keyty => Bucket keyty elemty -> keyty -> Word32
+buckethash :: Enum keyty => Bucket keyty elemty -> keyty -> Int
 buckethash Bucket { bucketLen = len, bucketA1 = a1,
                     bucketA2 = a2, bucketB = b } key =
   let
@@ -163,8 +160,9 @@ dict alist =
   let
     alpha = 2
     beta = 4
-    nassocs = fromIntegral (length alist)
+    nassocs = length alist
 
+    bucketsize :: Int -> Int
     bucketsize len = (len * len * alpha)
 
     -- Make a hash function
@@ -176,28 +174,24 @@ dict alist =
         b <- randomIO
         return (a1, a2, b)
 
-    makebuckets :: Enum keyty => IO (Word64, Word64, Word64, Word32,
-                                     Array Word32 (Word32, [(keyty, elemty)]))
+    -- Generate the first-level array (the buckets).
+    makebuckets :: Enum keyty => IO (Word64, Word64, Word64, Int,
+                                     Vector (Int, [(keyty, elemty)]))
     makebuckets =
       let
         -- Insert an entry in its bucket.
-        addent :: Enum keyty => Word64 -> Word64 -> Word64 ->
-                  IOArray Word32 (Word32, [(keyty, elemty)]) ->
-                  (keyty, elemty) -> IO ()
         addent a1 a2 b arr ent @ (key, _) =
           let
             hashcode = corehash a1 a2 b key
             idx = hashcode `mod` fromIntegral nassocs
           in do
-            (_, ents) <- IOArray.readArray arr idx
-            IOArray.writeArray arr idx (0, ent : ents)
+            (_, ents) <- Mutable.read arr idx
+            Mutable.write arr idx (0, ent : ents)
 
         -- Calculate offsets for buckets and the squared sum
-        addoffset :: IOArray Word32 (Word32, [(keyty, elemty)]) ->
-                     Word32 -> (Word32, Word32) -> IO (Word32, Word32)
         addoffset arr idx (sqrsum, offset) =
           do
-            (_, blist) <- IOArray.readArray arr idx
+            (_, blist) <- Mutable.read arr idx
             case blist of
               -- If there are no entries in the bucket, then leave
               -- the squared sum and offsets alone.
@@ -213,29 +207,33 @@ dict alist =
                   blen = fromIntegral (length blist)
                 in do
                   -- Set the offset for this bucket to the current offset.
-                  IOArray.writeArray arr idx (offset, blist)
+                  Mutable.write arr idx (offset, blist)
                   -- Update the squared sum and offset.
                   return (sqrsum + (blen * blen),
                           offset + bucketsize blen)
-      in do
-        -- Generate a hash function.
-        (a1, a2, b) <- makehash
-        arr <- IOArray.newArray (0, nassocs - 1) (0, [])
-        -- Try to build buckets with the hash function.
-        mapM_ (addent a1 a2 b arr) alist
-        -- Count the squared bucket size
-        (sqrsum, offset) <- foldrM (addoffset arr) (0, 0) [0 .. nassocs - 1]
-        -- Check that the squared sum is less than beta times the length
-        if sqrsum <= nassocs * beta
-          -- If we succeeded, then freeze the array.
-          then do
-            frozen <- Unsafe.unsafeFreeze arr
-            return (a1, a2, b, offset, frozen)
-          -- Otherwise, try again with a different hash function.
-          else makebuckets
 
-    makebucket :: IOArray Word32 (keyty, elemty) -> IOBitArray Word32 ->
-                  (Word32, [(keyty, elemty)]) -> IO (Bucket keyty elemty)
+        -- Loop until we succeed at generating the buckets.
+        genbuckets arr =
+          do
+            Mutable.set arr (0, [])
+            -- Generate a hash function.
+            (a1, a2, b) <- makehash
+            -- Try to build buckets with the hash function.
+            mapM_ (addent a1 a2 b arr) alist
+            -- Count the squared bucket size
+            (sqrsum, offset) <- foldrM (addoffset arr) (0, 0) [0 .. nassocs - 1]
+            -- Check that the squared sum is less than beta times the length
+            if sqrsum <= nassocs * beta
+              -- If we succeeded, then freeze the array.
+              then do
+                frozen <- Vector.unsafeFreeze arr
+                return (a1, a2, b, offset, frozen)
+              -- Otherwise, try again with a different hash function.
+              else genbuckets arr
+      in do
+        arr <- Mutable.new nassocs
+        genbuckets arr
+
     -- If the bucket list is empty, convert it to an empty bucket.
     makebucket _ _ (_, []) = return Empty
     -- If the bucket has one entry, generate a single entry.
@@ -243,7 +241,7 @@ dict alist =
       return Single { singleKey = key, singleElem = ent }
     makebucket entarr bitarr (offset, blist) =
       let
-        bsize = bucketsize (fromIntegral (length blist))
+        bsize = bucketsize (length blist)
 
         -- Clear out a range of the bit array
         reset :: IO ()
@@ -294,7 +292,7 @@ dict alist =
             hashcode = corehash a1 a2 b key
             idx = (hashcode `mod` bsize) + offset
           in
-            IOArray.writeArray entarr idx ent
+            Mutable.write entarr idx ent
       in do
         -- Generate a hash function
         (a1, a2, b) <- genhash
@@ -307,17 +305,17 @@ dict alist =
     singlebucket (_, [ent]) = Just ent
     singlebucket _ = error "Should not see multi-entry bucket"
 
-    makeentries :: Word32 -> Array Word32 (Word32, [(keyty, elemty)]) ->
-                   IO (Array Word32 (Bucket keyty elemty),
-                       Array Word32 (keyty, elemty),
-                       BitArray Word32)
+    makeentries :: Int -> Vector (Int, [(keyty, elemty)]) ->
+                   IO (Vector (Bucket keyty elemty),
+                       Vector (keyty, elemty),
+                       BitArray Int)
     makeentries 0 _ = error "Should not see zero-length array"
     makeentries entrieslen bucketsarr =
       do
-        entarray <- IOArray.newArray_ (0, entrieslen - 1)
+        entarray <- Mutable.new entrieslen
         bitarray <- IOBitArray.newArray (0, entrieslen - 1) False
         entries <- mapM (makebucket entarray bitarray) bucketsarr
-        frozenents <- Unsafe.unsafeFreeze entarray
+        frozenents <- Vector.unsafeFreeze entarray
         frozenbits <- IOBitArray.unsafeFreeze bitarray
         return (entries, frozenents, frozenbits)
   in do
@@ -331,11 +329,11 @@ dict alist =
       else return Simple { simpleBuckets = fmap singlebucket barray,
                            simpleA1 = a1, simpleA2 = a2, simpleB = b }
 
-instance (Enum keyty, Eq keyty) => Dict keyty FKSDict where
+instance (Enum keyty, Eq keyty, Show keyty) => Dict keyty FKSDict where
   member s @ Simple { simpleBuckets = buckets } key =
     let
       bucketidx = dicthash s key
-    in case buckets Array.! bucketidx of
+    in case buckets Vector.! bucketidx of
       Just (key', _) | key == key' -> True
       _ -> False
   member d @ Dict { dictBuckets = buckets, dictEntries = entries,
@@ -344,7 +342,7 @@ instance (Enum keyty, Eq keyty) => Dict keyty FKSDict where
       bucketidx = dicthash d key
     in
       -- Check the buckets array for what to do.
-      case buckets Array.! bucketidx of
+      case buckets Vector.! bucketidx of
         -- If we get a proper bucket, run the second hash function and
         -- check the entries array.
         b @ Bucket { bucketOffset = offset } ->
@@ -357,7 +355,7 @@ instance (Enum keyty, Eq keyty) => Dict keyty FKSDict where
             then
               -- If it does, then check that the key is correct.
               let
-                (key', _) = entries Array.! entryidx
+                (key', _) = entries Vector.! entryidx
               in
                 key' == key
             -- Otherwise, there's no such entry
@@ -367,12 +365,13 @@ instance (Enum keyty, Eq keyty) => Dict keyty FKSDict where
         -- For an empty bucket, return false
         Empty -> False
 
+  --lookup _ key | trace ("Lookup for " ++ show key) False = undefined
   lookup s @ Simple { simpleBuckets = buckets } key =
     let
       bucketidx = dicthash s key
     in
       -- Check that the entry exists and the key is equal
-      case buckets Array.! bucketidx of
+      case buckets Vector.! bucketidx of
         Just (key', ent) | key == key' -> Just ent
         _ -> Nothing
   lookup d @ Dict { dictBuckets = buckets, dictEntries = entries,
@@ -381,7 +380,7 @@ instance (Enum keyty, Eq keyty) => Dict keyty FKSDict where
       bucketidx = dicthash d key
     in
       -- Check the buckets array for what to do.
-      case buckets Array.! bucketidx of
+      case buckets Vector.! bucketidx of
         -- If we get a proper bucket, run the second hash function and
         -- check the entries array.
         b @ Bucket { bucketOffset = offset } ->
@@ -393,7 +392,7 @@ instance (Enum keyty, Eq keyty) => Dict keyty FKSDict where
             if emask BitArray.! entryidx
             then
               -- If it does, then check that the key is correct.
-              case entries Array.! entryidx of
+              case entries Vector.! entryidx of
                 -- If the key matches, we have the entry.
                 (key', ent) | key' == key -> Just ent
                 -- Otherwise, there's no such entry.
@@ -406,11 +405,11 @@ instance (Enum keyty, Eq keyty) => Dict keyty FKSDict where
         _ -> Nothing
 
   assocs Simple { simpleBuckets = buckets } =
-    catMaybes (Array.elems buckets)
+    catMaybes (Vector.toList buckets)
   assocs Dict { dictEntryMask = emask, dictEntries = entries,
                 dictBuckets = buckets } =
     let
-      entryfold (idx, True) accum = entries Array.! idx : accum
+      entryfold (idx, True) accum = entries Vector.! idx : accum
       entryfold (_, False) accum = accum
 
       bucketfold Single { singleKey = key, singleElem = ent } accum =
@@ -441,18 +440,21 @@ instance Functor (FKSDict keyty) where
   fmap f Dict { dictEntries = entries, dictEntryMask = emask, dictB = b,
                 dictBuckets = buckets, dictA1 = a1, dictA2 = a2 } =
     let
-      foldfun accum' (idx, True) =
+      mapfun arr (idx, True) =
         let
-          (key, ent) = entries Array.! idx
+          (key, ent) = entries Vector.! idx
         in
-          (idx, (key, f ent)) : accum'
-      foldfun accum' (_, False) = accum'
+          Mutable.write arr idx (key, f ent)
+      mapfun _ (_, False) = return ()
 
-      newassocs = foldl foldfun [] (BitArray.assocs emask)
+      newents = Vector.create $ do
+          arr <- Mutable.new (Vector.length entries)
+          mapM_ (mapfun arr) (BitArray.assocs emask)
+          return arr
     in
-      Dict { dictEntries = Array.array (Array.bounds entries) newassocs,
-             dictEntryMask = emask, dictBuckets = fmap (fmap f) buckets,
-             dictA1 = a1, dictA2 = a2, dictB = b }
+      Dict { dictEntries = newents, dictEntryMask = emask,
+             dictBuckets = fmap (fmap f) buckets, dictA1 = a1,
+             dictA2 = a2, dictB = b }
 
 instance Foldable (Bucket keyty) where
   foldMap f Single { singleElem = ent } = f ent
@@ -464,7 +466,7 @@ instance Foldable (FKSDict keyty) where
   foldMap f Dict { dictEntries = entries, dictEntryMask = emask,
                    dictBuckets = buckets } =
     let
-      foldfun (idx, True) = f (snd (entries Array.! idx))
+      foldfun (idx, True) = f (snd (entries Vector.! idx))
       foldfun (_, False) = mempty
     in
       foldMap (foldMap f) buckets `mappend`
@@ -486,17 +488,21 @@ instance Traversable (FKSDict keyty) where
   traverse f d @ Dict { dictEntries = entries, dictEntryMask = emask,
                         dictBuckets = buckets } =
     let
-      foldfun accum' (idx, True) =
+      foldfun (idx, True) accum' =
         let
-          (key, ent) = entries Array.! idx
+          (key, ent) = entries Vector.! idx
         in
-          (\val ents -> (idx, (key, val)) : ents) <$>
-            (f ent) <*> accum'
-      foldfun accum' (_, False) = accum'
+          (\val ents -> (idx, (key, val)) : ents) <$> (f ent) <*> accum'
+      foldfun (_, False) accum' = accum'
 
-      arrbounds = Array.bounds entries
+      newents :: [(Int, (keyty, elemty))] -> Vector (keyty, elemty)
+      newents newassocs = Vector.create $ do
+        arr <- Mutable.new (Vector.length entries)
+        mapM_ (\(idx, ent) -> Mutable.write arr idx ent) newassocs
+        return arr
+
     in
-      (\newassocs buckets' -> d { dictEntries = Array.array arrbounds newassocs,
+      (\newassocs buckets' -> d { dictEntries = newents newassocs,
                                   dictBuckets = buckets' }) <$>
-        foldl foldfun (pure []) (BitArray.assocs emask) <*>
-        traverse (traverse f) buckets
+      foldr foldfun (pure []) (BitArray.assocs emask) <*>
+      traverse (traverse f) buckets
