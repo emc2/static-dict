@@ -81,7 +81,6 @@ data Bucket keyty elemty =
     }
     -- | An empty bucket
   | Empty
-    deriving Show
 
 -- | Static dictionary over 'Word's, with @elemty@ as element data.
 data FKSDict keyty elemty =
@@ -152,7 +151,7 @@ buckethash Bucket { bucketLen = len, bucketA1 = a1,
 buckethash _ _ = error "Hashing on invalid bucket!"
 
 dict :: forall keyty elemty .
-        (Enum keyty, Show keyty, Show elemty) =>
+        (Enum keyty) =>
         [(keyty, elemty)]
      -- ^ List of key/value pairs from which to build the dictionary
      -> IO (FKSDict keyty elemty)
@@ -329,7 +328,7 @@ dict alist =
       else return Simple { simpleBuckets = fmap singlebucket barray,
                            simpleA1 = a1, simpleA2 = a2, simpleB = b }
 
-instance (Enum keyty, Eq keyty, Show keyty) => Dict keyty FKSDict where
+instance (Enum keyty, Eq keyty) => Dict keyty FKSDict where
   member s @ Simple { simpleBuckets = buckets } key =
     let
       bucketidx = dicthash s key
