@@ -43,3 +43,4 @@ Library
                         random, deepseq
   exposed-modules:      Data.Dict
                         Data.Dict.FKS
+                        Data.Dict.Linear
